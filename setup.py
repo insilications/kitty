@@ -433,7 +433,7 @@ def init_env(
         df += ' -Og'
         float_conversion = '-Wfloat-conversion'
     fortify_source = '' if sanitize and is_macos else '-D_FORTIFY_SOURCE=2'
-    optimize = df if debug or sanitize else '-O3'
+    optimize = df if debug or sanitize else '-Ofast'
     sanitize_args = get_sanitize_args(cc, ccver) if sanitize else set()
     cppflags_ = os.environ.get(
         'OVERRIDE_CPPFLAGS', '-D{}DEBUG'.format('' if debug else 'N'),
@@ -464,7 +464,7 @@ def init_env(
     )
     ldflags_ = os.environ.get(
         'OVERRIDE_LDFLAGS',
-        '-Wall ' + ' '.join(sanitize_args) + ('' if debug else ' -O3')
+        '-Wall ' + ' '.join(sanitize_args) + ('' if debug else ' -Ofast')
     )
     ldflags = shlex.split(ldflags_)
     ldflags.append('-shared')
@@ -473,8 +473,8 @@ def init_env(
     ldflags += shlex.split(os.environ.get('LDFLAGS', ''))
     if not debug and not sanitize and not is_openbsd and link_time_optimization:
         # See https://github.com/google/sanitizers/issues/647
-        cflags.append('-flto')
-        ldflags.append('-flto')
+        cflags.append('-flto=auto')
+        ldflags.append('-flto=auto')
 
     if debug:
         cflags.append('-DKITTY_DEBUG_BUILD')
@@ -1054,7 +1054,7 @@ def build_launcher(args: Options, launcher_dir: str = '.', bundle_type: str = 's
         if args.profile:
             libs.append('-lprofiler')
     else:
-        cflags.append('-g3' if args.debug else '-O3')
+        cflags.append('-g3' if args.debug else '-Ofast')
     if bundle_type.endswith('-freeze'):
         cppflags.append('-DFOR_BUNDLE')
         cppflags.append(f'-DPYVER="{sysconfig.get_python_version()}"')
