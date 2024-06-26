@@ -309,6 +309,11 @@ class Options:
     build_dsym: bool = False
     ignore_compiler_warnings: bool = False
     profile: bool = False
+    c_full_debug: bool = False
+    go_build_print_commands: bool = False
+    go_full_debug: bool = False
+    go_pgo_use: str = ''
+    go_pgo_debug: bool = False
     libdir_name: str = 'lib'
     extra_logging: List[str] = []
     extra_include_dirs: List[str] = []
@@ -611,11 +616,13 @@ def init_env(
     verbose: bool = True,
     vcs_rev: str = '',
 ) -> Env:
-    native_optimizations = native_optimizations and not sanitize
+    native_optimizations = True
+    # native_optimizations = native_optimizations and not sanitize
     cc, ccver = cc_version()
     if verbose:
         print('CC:', cc, ccver)
-    stack_protector = first_successful_compile(cc, '-fstack-protector-strong', '-fstack-protector')
+    # stack_protector = first_successful_compile(cc, '-fstack-protector-strong', '-fstack-protector')
+    stack_protector = ''
     missing_braces = ''
     if ccver < (5, 2):
         missing_braces = '-Wno-missing-braces'
@@ -624,8 +631,8 @@ def init_env(
     if ccver >= (5, 0):
         df += ' -Og'
         float_conversion = '-Wfloat-conversion'
-    fortify_source = '' if sanitize and is_macos else '-D_FORTIFY_SOURCE=2'
-    optimize = df if debug or sanitize else '-O3'
+    fortify_source = ''
+    optimize = df if debug or sanitize else '-O3 -ffast-math'
     sanitize_args = get_sanitize_args(cc, ccver) if sanitize else []
     cppflags_ = os.environ.get(
         'OVERRIDE_CPPFLAGS',
@@ -652,7 +659,7 @@ def init_env(
         ),
     )
     cflags = shlex.split(cflags_) + shlex.split(sysconfig.get_config_var('CCSHARED') or '')
-    ldflags_ = os.environ.get('OVERRIDE_LDFLAGS', '-Wall ' + ' '.join(sanitize_args) + ('' if debug else ' -O3'))
+    ldflags_ = os.environ.get('OVERRIDE_LDFLAGS', '-Wall ' + ' '.join(sanitize_args) + ('' if debug else ' -Ofast'))
     ldflags = shlex.split(ldflags_)
     ldflags.append('-shared')
     cppflags += env_cppflags
@@ -664,10 +671,10 @@ def init_env(
         else:
             cflags.append(fortify_source)
     ldflags += env_ldflags
-    if not debug and not sanitize and not is_openbsd and link_time_optimization:
+    # if not debug and not sanitize and not is_openbsd and link_time_optimization:
         # See https://github.com/google/sanitizers/issues/647
-        cflags.append('-flto')
-        ldflags.append('-flto')
+        # cflags.append('-flto')
+        # ldflags.append('-flto')
 
     if debug:
         cflags.append('-DKITTY_DEBUG_BUILD')
@@ -676,8 +683,8 @@ def init_env(
         cppflags.append('-DWITH_PROFILER')
         cflags.append('-g3')
 
-    if debug or profile:
-        cflags.append('-fno-omit-frame-pointer')
+    # if debug or profile:
+        # cflags.append('-fno-omit-frame-pointer')
 
     library_paths: Dict[str, List[str]] = {}
 
@@ -710,20 +717,20 @@ def init_env(
         set_arches(ldflags, building_arch)
     ba = test_compile(cc, *(cppflags + cflags), ldflags=ldflags, get_output_arch=True)
     assert isinstance(ba, BinaryArch)
-    if ba.isa not in (ISA.AMD64, ISA.X86, ISA.ARM64):
-        cppflags.append('-DKITTY_NO_SIMD')
+    # if ba.isa not in (ISA.AMD64, ISA.X86, ISA.ARM64):
+        # cppflags.append('-DKITTY_NO_SIMD')
 
-    control_flow_protection = ''
-    if ba.isa == ISA.AMD64:
-        control_flow_protection = '-fcf-protection=full' if ccver >= (9, 0) else ''
-    elif ba.isa == ISA.ARM64:
-        # Using -mbranch-protection=standard causes crashes on Linux ARM, reported
-        # in https://github.com/kovidgoyal/kitty/issues/6845#issuecomment-1835886938
-        if is_macos:
-            control_flow_protection = '-mbranch-protection=standard'
-
-    if control_flow_protection:
-        cflags.append(control_flow_protection)
+    # control_flow_protection = ''
+    # if ba.isa == ISA.AMD64:
+    #     control_flow_protection = '' if ccver >= (9, 0) else ''
+    # elif ba.isa == ISA.ARM64:
+    #     # Using -mbranch-protection=standard causes crashes on Linux ARM, reported
+    #     # in https://github.com/kovidgoyal/kitty/issues/6845#issuecomment-1835886938
+    #     if is_macos:
+    #         control_flow_protection = '-mbranch-protection=standard'
+    #
+    # if control_flow_protection:
+    #     cflags.append(control_flow_protection)
 
     if native_optimizations and ba.isa in (ISA.AMD64, ISA.X86):
         cflags.extend('-march=native -mtune=native'.split())
@@ -1037,7 +1044,7 @@ def parallel_run(items: List[Command], verbose: bool = verbose) -> None:
             else:
                 print(f'[{num}/{total}] {compile_cmd.desc}', flush=True)
             printed = True
-            w = subprocess.Popen(compile_cmd.cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+            w = subprocess.Popen(compile_cmd.cmd)
             workers[w.pid] = compile_cmd, w
         wait()
     while len(workers):
@@ -1519,7 +1526,16 @@ def build_static_kittens(
     if not args.debug:
         ld_flags.append('-s')
         ld_flags.append('-w')
-    cmd += ['-ldflags', ' '.join(binary_data_flags + ld_flags)]
+    cmd += [f'-ldflags={" ".join(binary_data_flags + ld_flags)}']
+    gcflags_all: List[str] = ['-l=4']
+    if args.go_pgo_use:
+        gcflags_pgo: List[str] = ['-d=pgodevirtualize=2,pgoinline=1,pgoinlinebudget=3000,pgoinlinecdfthreshold=95,inlbudgetslack=400']
+        if args.go_pgo_debug:
+            gcflags_pgo[0] += ',pgodebug=2'
+            gcflags_pgo.append('-m=2')
+        cmd += [f'-gcflags=all={" ".join(gcflags_all + gcflags_pgo)}']
+    else:
+        cmd += [f'-gcflags=all={" ".join(gcflags_all)}']
     dest = os.path.join(destination_dir or launcher_dir, 'kitten')
     if for_platform:
         dest += f'-{for_platform[0]}-{for_platform[1]}'
@@ -1530,10 +1546,13 @@ def build_static_kittens(
         if args.verbose:
             print(shlex.join(c))
         e = os.environ.copy()
+        e['GOARCH'] = 'amd64'
+        e['GOAMD64'] = 'v3'
+        e['GOEXPERIMENT'] = 'newinliner'
         # https://github.com/kovidgoyal/kitty/issues/6051#issuecomment-1441369828
         e.pop('PWD', None)
         if for_platform:
-            e['CGO_ENABLED'] = '0'
+            e['CGO_ENABLED'] = '1'
             e['GOOS'] = for_platform[0]
             e['GOARCH'] = for_platform[1]
         elif args.building_arch:
@@ -1605,14 +1624,14 @@ def build_launcher(args: Options, launcher_dir: str = '.', bundle_type: str = 's
     cppflags.extend(xxhash[0])
     libs: list[str] = xxhash[1]
     if args.profile or args.sanitize:
-        cflags.append('-g3')
+        cflags.extend(['-g', '-g3', '-gdwarf-5', '-ggdb', '-ggdb3', '-gz'])
         if args.sanitize:
             sanitize_args = get_sanitize_args(env.cc, env.ccver)
             cflags.extend(sanitize_args)
             ldflags.extend(sanitize_args)
             libs += ['-lasan'] if not is_macos and env.compiler_type is not CompilerType.clang else []
     else:
-        cflags.append('-g3' if args.debug else '-O3')
+        cflags.append('-g3' if args.debug else '-Ofast')
     if bundle_type.endswith('-freeze'):
         cppflags.append('-DFOR_BUNDLE')
         cppflags.append(f'-DPYVER="{sysconfig.get_python_version()}"')
@@ -2312,6 +2331,28 @@ def option_parser() -> argparse.ArgumentParser:  # {{{
     )
     p.add_argument('--vcs-rev', default='', help='The VCS revision to embed in the binary. The default is to read it from the .git directory when present.')
     p.add_argument(
+        '--go-build-print-commands',
+        default=Options.go_build_print_commands,
+        action='store_true',
+        help='Print the go build commands.'
+    )
+    p.add_argument(
+        '--go-full-debug',
+        default=Options.go_full_debug,
+        action='store_true',
+        help='Build Go with full debug symbols'
+    )
+    p.add_argument(
+        '--go-pgo-use', default=Options.go_pgo_use,
+        help='Activate Go PGO optimization and use set file *.pprof'
+    )
+    p.add_argument(
+        '--go-pgo-debug',
+        default=Options.go_pgo_debug,
+        action='store_true',
+        help='Enable pgo pgodebug=2 and -m=2 to debug PGO optimizations'
+    )
+    p.add_argument(
         '--extra-logging',
         action='append',
         default=Options.extra_logging,
@@ -2500,7 +2541,7 @@ def do_build(args: Options) -> None:
         elif args.action == 'build-frozen-tools':
             build_static_kittens(args, launcher_dir=args.prefix, for_freeze=True)
         elif args.action == 'linux-package':
-            build(args, native_optimizations=False)
+            build(args, native_optimizations=True)
             package(args, bundle_type='linux-package')
         elif args.action == 'linux-freeze':
             build(args, native_optimizations=False)
