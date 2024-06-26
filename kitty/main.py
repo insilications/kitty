@@ -410,7 +410,7 @@ def setup_environment(opts: Options, cli_opts: CLIOptions) -> None:
     from_config_file = False
     if not cli_opts.listen_on:
         cli_opts.listen_on = opts.listen_on
-        from_config_file = True
+        from_config_file = False
     if cli_opts.listen_on:
         cli_opts.listen_on = expand_listen_on(cli_opts.listen_on, from_config_file)
     env = opts.env.copy()
