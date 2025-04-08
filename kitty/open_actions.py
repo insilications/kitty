@@ -70,7 +70,7 @@ def parse(lines: Iterable[str]) -> Iterator[OpenAction]:
         entries.append((tuple(match_criteria), tuple(raw_actions)))
 
     with to_cmdline_implementation.filter_env_vars(
-        'URL', 'FILE_PATH', 'FILE', 'FRAGMENT', 'URL_PATH', 'NETLOC',
+        'URL', 'FILE_PATH', 'FILE', 'FRAGMENT', 'URL_PATH', 'NETLOC', 'MOUSE_EVENT_MOD',
         EDITOR=shlex.join(get_editor()),
         SHELL=resolved_shell(get_options())[0]
     ):
@@ -158,7 +158,7 @@ def url_matches_criteria(purl: 'ParseResult', url: str, unquoted_path: str, crit
     return True
 
 
-def actions_for_url_from_list(url: str, actions: Iterable[OpenAction]) -> Iterator[KeyAction]:
+def actions_for_url_from_list(url: str, actions: Iterable[OpenAction], mouse_event_mod: int = 0) -> Iterator[KeyAction]:
     try:
         purl = urlparse(url)
     except Exception:
@@ -179,6 +179,7 @@ def actions_for_url_from_list(url: str, actions: Iterable[OpenAction]) -> Iterat
         'FILE': posixpath.basename(path),
         'FRAGMENT': frag,
         'NETLOC': netloc,
+        'MOUSE_EVENT_MOD': str(mouse_event_mod),
     }
 
     def expand(x: Any) -> Any:
@@ -276,13 +277,13 @@ action launch --type=os-window ssh -- $URL
 '''.splitlines()))
 
 
-def actions_for_url(url: str, actions_spec: Optional[str] = None) -> Iterator[KeyAction]:
+def actions_for_url(url: str, actions_spec: Optional[str] = None, mouse_event_mod: int = 0) -> Iterator[KeyAction]:
     if actions_spec is None:
         actions = load_open_actions()
     else:
         actions = tuple(parse(actions_spec.splitlines()))
     found = False
-    for action in actions_for_url_from_list(url, actions):
+    for action in actions_for_url_from_list(url, actions, mouse_event_mod):
         found = True
         yield action
     if not found:
