@@ -2590,7 +2590,7 @@ class Boss:
         self.open_url(website_url())
 
     @ac('misc', 'Open the specified URL')
-    def open_url(self, url: str, program: str | list[str] | None = None, cwd: str | None = None) -> None:
+    def open_url(self, url: str, program: Optional[Union[str, list[str]]] = None, cwd: Optional[str] = None, mouse_event_mod: int = 0) -> None:
         if not url:
             return
         if isinstance(program, str):
@@ -2598,7 +2598,7 @@ class Boss:
         found_action = False
         if program is None:
             from .open_actions import actions_for_url
-            actions = list(actions_for_url(url))
+            actions = list(actions_for_url(url, mouse_event_mod=mouse_event_mod))
             if actions:
                 found_action = True
                 self.dispatch_action(actions.pop(0))

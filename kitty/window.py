@@ -732,6 +732,7 @@ class Window:
         self.current_remote_data: list[str] = []
         self.current_mouse_event_button = 0
         self.current_clipboard_read_ask: bool | None = None
+        self.current_mouse_event_mods = 0
         self.last_cmd_output_start_time = 0.
         self.last_cmd_end_notification: tuple[int, 'OnlyWhen'] | None = None
         self.open_url_handler: 'OpenUrlHandler' = None
@@ -1308,6 +1309,7 @@ class Window:
         event['mods'] = event.get('mods', 0) & mod_mask
         ev = MouseEvent(**event)
         self.current_mouse_event_button = ev.button
+        self.current_mouse_event_mods = ev.mods
         action = get_options().mousemap.get(ev)
         if action is None:
             return False
@@ -1367,7 +1369,7 @@ class Window:
                     window=self, title=_('Hyperlink activated'),
                 )
                 return
-        boss.open_url(url, cwd=cwd)
+        boss.open_url(url, cwd=cwd, mouse_event_mod=self.current_mouse_event_mods)
 
     def hyperlink_open_confirmed(self, url: str, cwd: str | None, q: str) -> None:
         if q == 'o':
