@@ -1477,19 +1477,21 @@ draw_text_loop(Screen *self, const uint32_t *chars, size_t num_chars, text_loop_
 #undef TEMPLATE_CELLS
 }
 
-#define PREPARE_FOR_DRAW_TEXT                                                                                                       \
-    if (tc_should_gc(self->text_cache)) screen_garbage_collect_text_cache(self);                                                    \
-    const bool force_underline = OPT(underline_hyperlinks) == UNDERLINE_ALWAYS && self->active_hyperlink_id != 0;                   \
-    CellAttrs attrs = cursor_to_attrs(self->cursor);                                                                                \
-    if (force_underline) attrs.decoration = OPT(url_style);                                                                         \
-    text_loop_state s = {                                                                                                           \
-        .cc = (CPUCell){.hyperlink_id = self->active_hyperlink_id},                                                                 \
-        .g = (GPUCell){                                                                                                             \
-            .attrs = attrs,                                                                                                         \
-            .fg = self->cursor->sgr.fg & COL_MASK,                                                                                  \
-            .bg = self->cursor->sgr.bg & COL_MASK,                                                                                  \
-            .decoration_fg = force_underline ? ((OPT(url_color) & COL_MASK) << 8) | 2 : self->cursor->sgr.decoration_fg & COL_MASK, \
-        }};
+#define PREPARE_FOR_DRAW_TEXT \
+    if (tc_should_gc(self->text_cache)) screen_garbage_collect_text_cache(self); \
+    const bool force_underline = OPT(underline_hyperlinks) == UNDERLINE_ALWAYS && self->active_hyperlink_id != 0; \
+    CellAttrs attrs = cursor_to_attrs(self->cursor); \
+    if (force_underline) attrs.decoration = OPT(url_style); \
+    text_loop_state s={ \
+        .cc=(CPUCell){.hyperlink_id=self->active_hyperlink_id}, \
+        .g=(GPUCell){ \
+            .attrs=attrs, \
+            .fg=self->cursor->sgr.fg & COL_MASK, .bg=self->cursor->sgr.bg & COL_MASK, \
+            .decoration_fg=force_underline ? ((OPT(url_color) & COL_MASK) << 8) | 2 : self->cursor->sgr.decoration_fg & COL_MASK, \
+        } \
+    }; \
+    { GPUCell *g = (GPUCell *)&s.g; g->fg += \
+        (g->attrs.bold && (g->fg & 0xff) == 1 && g->fg < 0x800) * 0x800; };
 
 static void
 draw_text(Screen *self, const uint32_t *chars, size_t num_chars) {
