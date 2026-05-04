@@ -1831,7 +1831,7 @@ create_os_window(PyObject UNUSED *self, PyObject *args, PyObject *kw) {
         }
     }
     if (is_first_window) {
-        PyObject *ret = PyObject_CallNoArgs(load_programs);
+        PyObject *ret = PyObject_CallFunction(load_programs, "O", OPT(subpixel_rendering) ? Py_True : Py_False);
         if (ret == NULL) return NULL;
         Py_DECREF(ret);
         get_platform_dependent_config_values(glfw_window);

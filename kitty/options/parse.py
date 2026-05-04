@@ -1340,6 +1340,9 @@ class Parser:
 
     choices_for_strip_trailing_spaces = frozenset(('always', 'never', 'smart'))
 
+    def subpixel_rendering(self, val: str, ans: dict[str, typing.Any]) -> None:
+        ans['subpixel_rendering'] = to_bool(val)
+
     def symbol_map(self, val: str, ans: dict[str, typing.Any]) -> None:
         for k, v in symbol_map(val):
             ans["symbol_map"][k] = v

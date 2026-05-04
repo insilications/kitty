@@ -13,7 +13,8 @@ typedef union SpritePosition {
         sprite_index idx : sizeof(sprite_index) * 8;
         bool rendered : 1;
         bool colored : 1;
-        uint32_t : 30;
+        bool subpixel : 1;
+        uint32_t : 29;
     };
     uint64_t val;
 } SpritePosition;

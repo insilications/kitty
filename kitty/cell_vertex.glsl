@@ -61,14 +61,17 @@ out vec3 cell_foreground;
 out vec4 cursor_color_premult;
 out vec3 decoration_fg;
 out float colored_sprite;
+out float subpixel;
 #endif
 
 
 // Utility functions {{{
 const uint BYTE_MASK = uint(0xFF);
-const uint SPRITE_INDEX_MASK = uint(0x7fffffff);
+const uint SPRITE_INDEX_MASK = uint(0x3fffffff);
 const uint SPRITE_COLORED_MASK = uint(0x80000000);
 const uint SPRITE_COLORED_SHIFT = 31u;
+const uint SPRITE_SUBPIXEL_MASK = uint(0x40000000);
+const uint SPRITE_SUBPIXEL_SHIFT = 30u;
 const uint BIT_MASK = 1u;
 const uint DECORATION_MASK = uint({DECORATION_MASK});
 
@@ -226,6 +229,7 @@ CellData set_vertex_position(vec3 cell_fg, vec3 cell_bg) {
 #ifndef ONLY_BACKGROUND
     sprite_pos = to_sprite_pos(pos, sprite_idx[0] & SPRITE_INDEX_MASK);
     colored_sprite = float((sprite_idx[0] & SPRITE_COLORED_MASK) >> SPRITE_COLORED_SHIFT);
+    subpixel = float((sprite_idx[0] & SPRITE_SUBPIXEL_MASK) >> SPRITE_SUBPIXEL_SHIFT);
 #endif
     // Cursor shape and colors
     float has_main_cursor = float(is_cursor(column, row));

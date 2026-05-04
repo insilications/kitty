@@ -960,8 +960,9 @@ extract_cell_region(Canvas *canvas, unsigned i, Region *src, const Region *dest,
 
 static void
 set_cell_sprite(GPUCell *cell, const SpritePosition *sp) {
-    cell->sprite_idx = sp->idx & 0x7fffffff;
+    cell->sprite_idx = sp->idx & 0x3fffffff;
     if (sp->colored) cell->sprite_idx |= 0x80000000;
+    if (sp->subpixel) cell->sprite_idx |= 0x40000000;
 }
 
 static Region
@@ -1062,6 +1063,7 @@ render_box_cell(FontGroup *fg, RunFont rf, CPUCell *cpu_cell, GPUCell *gpu_cell,
         sp[ligature_index] = sprite_position_for(fg, rf, global_glyph_render_scratch.glyphs, num_glyphs, ligature_index, num_cells);
         if (sp[ligature_index] == NULL) failed;
         sp[ligature_index]->colored = false;
+        sp[ligature_index]->subpixel = false;
         if (!sp[ligature_index]->rendered) all_rendered = false;
     }
     if (all_rendered) {
@@ -1103,7 +1105,7 @@ render_box_cell(FontGroup *fg, RunFont rf, CPUCell *cpu_cell, GPUCell *gpu_cell,
             sp[i]->idx = current_send_sprite_to_gpu(fg, b, dm, scaled_metrics);
             if (!sp[i]->idx) failed;
             /*dump_sprite(b, unscaled_metrics.cell_width, unscaled_metrics.cell_height);*/
-            sp[i]->rendered = true; sp[i]->colored = false;
+            sp[i]->rendered = true; sp[i]->colored = false; sp[i]->subpixel = false;
         }
         set_cell_sprite(gpu_cell + i, sp[i]);
         /*printf("Sprite %u: pos: %u sz: (%u, %u)\n", i, sp[i]->idx, fg->fcm.cell_width, fg->fcm.cell_height); dump_sprite(b, fg->fcm.cell_width, fg->fcm.cell_height);*/
@@ -1215,6 +1217,7 @@ render_group(
         for (unsigned i = 1; i < num_glyphs && is_only_filled_boxes; i++) if (global_glyph_render_scratch.glyphs[i] != box_glyph_id) is_only_filled_boxes = false;
     }
     bool was_colored = !is_only_filled_boxes && has_emoji_presentation(cpu_cells, global_glyph_render_scratch.lc);
+    bool was_subpixel = false;
     GlyphRenderInfo ri = {0};
     pixel *canvas = rendering_in_smaller_area && canvas_width != scaled_canvas_width ? scratch : fg->canvas.buf;
     if (is_only_filled_boxes) { // special case rendering of █ for tests
@@ -1222,7 +1225,7 @@ render_group(
         ri.canvas_width = canvas_width; ri.rendered_width = num_glyphs * scaled_metrics.cell_width;
         // dump_sprite(canvas, scaled_metrics.cell_width * num_scaled_cells, scaled_metrics.cell_height);
     } else {
-        render_glyphs_in_cells(font->face, font->bold, font->italic, info, positions, num_glyphs, canvas, scaled_metrics.cell_width, scaled_metrics.cell_height, num_scaled_cells, scaled_metrics.baseline, &was_colored, (FONTS_DATA_HANDLE)fg, &ri);
+        render_glyphs_in_cells(font->face, font->bold, font->italic, info, positions, num_glyphs, canvas, scaled_metrics.cell_width, scaled_metrics.cell_height, num_scaled_cells, scaled_metrics.baseline, &was_colored, &was_subpixel, (FONTS_DATA_HANDLE)fg, &ri);
         ri.rendered_width = MIN(ri.rendered_width, ri.canvas_width);
     }
     // printf("num_cells: %u num_scaled_cells: %u num_glyphs: %u scale: %f unscaled: %ux%u scaled: %ux%u rendered_width: %d\n", num_cells, num_scaled_cells, num_glyphs, scale, unscaled_metrics.cell_width, unscaled_metrics.cell_height, scaled_metrics.cell_width, scaled_metrics.cell_height, ri.rendered_width);
@@ -1259,7 +1262,7 @@ render_group(
                     sp[i]->idx = current_send_sprite_to_gpu(fg, b, dm, scaled_metrics);
                     if (!sp[i]->idx) failed;
                 } else sp[i]->idx = sp[i-1]->idx;
-                sp[i]->rendered = true; sp[i]->colored = was_colored;
+                sp[i]->rendered = true; sp[i]->colored = was_colored; sp[i]->subpixel = was_subpixel;
             }
             set_cell_sprite(gpu_cells + i, sp[i]);
         }
@@ -1277,7 +1280,7 @@ render_group(
                 sp[i]->idx = current_send_sprite_to_gpu(fg, b, dm, scaled_metrics);
                 if (!sp[i]->idx) failed;
                 /*dump_sprite(b, unscaled_metrics.cell_width, unscaled_metrics.cell_height);*/
-                sp[i]->rendered = true; sp[i]->colored = was_colored;
+                sp[i]->rendered = true; sp[i]->colored = was_colored; sp[i]->subpixel = was_subpixel;
             }
             set_cell_sprite(gpu_cells + i, sp[i]);
         }

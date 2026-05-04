@@ -46,6 +46,7 @@ typedef struct {
     FT_Face face, face_for_cairo;
     FaceMetrics metrics;
     int hinting, hintstyle;
+    int rgba;
     bool is_scalable, has_color, is_variable, has_svg;
     FT_F26Dot6 char_width, char_height;
     double xdpi, ydpi;
@@ -247,7 +248,7 @@ face_apply_scaling(PyObject *f, const FONTS_DATA_HANDLE fg) {
 }
 
 static bool
-init_ft_face(Face *self, PyObject *path, int hinting, int hintstyle, long index, FONTS_DATA_HANDLE fg) {
+init_ft_face(Face *self, PyObject *path, int hinting, int hintstyle, int rgba, long index, FONTS_DATA_HANDLE fg) {
     copy_face_metrics(self);
     self->index = index;
     self->is_scalable = FT_IS_SCALABLE(self->face);
@@ -259,6 +260,7 @@ init_ft_face(Face *self, PyObject *path, int hinting, int hintstyle, long index,
     self->has_svg = false;
 #endif
     self->hinting = hinting; self->hintstyle = hintstyle;
+    self->rgba = rgba;
     if (fg && !set_size_for_face((PyObject*)self, 0, false, fg)) return false;
     self->harfbuzz_font = hb_ft_font_create(self->face, NULL);
     if (self->harfbuzz_font == NULL) { PyErr_NoMemory(); return false; }
@@ -309,17 +311,19 @@ face_from_descriptor(PyObject *descriptor, FONTS_DATA_HANDLE fg) {
     long index = 0;
     bool hinting = false;
     long hint_style = 0;
+    long rgba = 0;
     D(path, PyUnicode_AsUTF8, false);
     D(index, PyLong_AsLong, true);
     D(hinting, PyObject_IsTrue, true);
     D(hint_style, PyLong_AsLong, true);
+    D(rgba, PyLong_AsLong, true);
 #undef D
     RAII_PyObject(retval, Face_Type.tp_alloc(&Face_Type, 0));
     Face *self = (Face *)retval;
     if (retval != NULL) {
         int error;
         if ((error = FT_New_Face(library, path, index, &(self->face)))) { self->face = NULL; return set_load_error(path, error); }
-        if (!init_ft_face(self, PyDict_GetItemString(descriptor, "path"), hinting, hint_style, index, fg)) { Py_CLEAR(retval); return NULL; }
+        if (!init_ft_face(self, PyDict_GetItemString(descriptor, "path"), hinting, hint_style, rgba, index, fg)) { Py_CLEAR(retval); return NULL; }
         PyObject *ns = PyDict_GetItemString(descriptor, "named_style");
         if (ns) {
             unsigned long index = PyLong_AsUnsignedLong(ns);
@@ -381,7 +385,7 @@ face_from_path(const char *path, int index, FONTS_DATA_HANDLE fg) {
     if (error) { ans->face = NULL; return set_load_error(path, error); }
     RAII_PyObject(pypath, PyUnicode_FromString(path));
     if (!pypath) return NULL;
-    if (!init_ft_face(ans, pypath, true, 3, index, fg)) { Py_CLEAR(ans); return NULL; }
+    if (!init_ft_face(ans, pypath, true, 3, 1, index, fg)) { Py_CLEAR(ans); return NULL; }
     return (PyObject*)ans;
 }
 
@@ -537,6 +541,7 @@ typedef struct {
     size_t start_x, width, stride;
     size_t rows;
     FT_Pixel_Mode pixel_mode;
+    bool bgr;
     bool needs_free;
     unsigned int factor, right_edge;
     int bitmap_left, bitmap_top;
@@ -550,6 +555,37 @@ free_processed_bitmap(ProcessedBitmap *bm) {
     }
 }
 
+static inline bool
+is_pixel_visible(ProcessedBitmap *ans, size_t x, size_t y) {
+    double color;
+    unsigned char *s;
+    switch (ans->pixel_mode) {
+        case FT_PIXEL_MODE_GRAY:
+            return ans->buf[x + y * ans->stride] > 200;
+        case FT_PIXEL_MODE_LCD:
+            s = ans->buf + 3 * x + y * ans->stride;
+#define C(red, green, blue) s[red]*0.3 + s[green]*0.59 + s[blue]*0.11
+            if (!ans->bgr)
+                color = C(0, 1, 2);
+            else
+                color = C(2, 1, 0);
+#undef C
+            break;
+        case FT_PIXEL_MODE_LCD_V:
+            s = ans->buf + x + 3 * y * ans->stride;
+#define C(red, green, blue) s[red * ans->stride]*0.3 + s[green * ans->stride]*0.59 + s[blue * ans->stride]*0.11
+            if (!ans->bgr)
+                color = C(0, 1, 2);
+            else
+                color = C(2, 1, 0);
+#undef C
+            break;
+        default:
+            return true;
+    }
+    return color > 0.5; // TODO: tweak this value
+}
+
 static void
 trim_borders(ProcessedBitmap *ans, size_t extra) {
     bool column_has_text = false;
@@ -557,7 +593,7 @@ trim_borders(ProcessedBitmap *ans, size_t extra) {
     // Trim empty columns from the right side of the bitmap
     for (ssize_t x = ans->width - 1; !column_has_text && x > -1 && extra > 0; x--) {
         for (size_t y = 0; y < ans->rows && !column_has_text; y++) {
-            if (ans->buf[x + y * ans->stride] > 200) column_has_text = true;
+            if (is_pixel_visible(ans, x, y)) column_has_text = true;
         }
         if (!column_has_text) { ans->width--; extra--; }
     }
@@ -570,16 +606,19 @@ trim_borders(ProcessedBitmap *ans, size_t extra) {
 static void
 populate_processed_bitmap(FT_GlyphSlotRec *slot, FT_Bitmap *bitmap, ProcessedBitmap *ans, bool copy_buf) {
     ans->stride = bitmap->pitch < 0 ? -bitmap->pitch : bitmap->pitch;
-    ans->rows = bitmap->rows;
     if (copy_buf) {
-        ans->buf = malloc(ans->rows * ans->stride);
+        ans->buf = malloc(bitmap->rows * ans->stride);
         if (!ans->buf) fatal("Out of memory");
         ans->needs_free = true;
-        memcpy(ans->buf, bitmap->buffer, ans->rows * ans->stride);
+        memcpy(ans->buf, bitmap->buffer, bitmap->rows * ans->stride);
     } else ans->buf = bitmap->buffer;
-    ans->start_x = 0; ans->width = bitmap->width;
+    ans->start_x = 0; ans->width = bitmap->width; ans->rows = bitmap->rows;
     ans->pixel_mode = bitmap->pixel_mode;
     ans->bitmap_top = slot->bitmap_top; ans->bitmap_left = slot->bitmap_left;
+    if (ans->pixel_mode == FT_PIXEL_MODE_LCD)
+        ans->width /= 3;
+    else if (ans->pixel_mode == FT_PIXEL_MODE_LCD_V)
+        ans->rows /= 3;
 }
 
 bool
@@ -600,7 +639,22 @@ freetype_convert_mono_bitmap(FT_Bitmap *src, FT_Bitmap *dest) {
 
 static bool
 render_bitmap(Face *self, int glyph_id, ProcessedBitmap *ans, unsigned int cell_width, unsigned int cell_height, unsigned int num_cells, bool bold, bool italic, bool rescale, FONTS_DATA_HANDLE fg) {
-    if (!load_glyph(self, glyph_id, FT_LOAD_RENDER)) return false;
+    if (!load_glyph(self, glyph_id, FT_LOAD_DEFAULT)) return false;
+    int render = FT_RENDER_MODE_NORMAL;
+    if (OPT(subpixel_rendering)) {
+        switch (self->rgba) {
+            case FC_RGBA_RGB:
+            case FC_RGBA_BGR:
+                render = FT_RENDER_MODE_LCD;
+                break;
+            case FC_RGBA_VRGB:
+            case FC_RGBA_VBGR:
+                render = FT_RENDER_MODE_LCD_V;
+                break;
+        }
+    }
+    if (FT_Render_Glyph(self->face->glyph, render)) return false;
+
     unsigned int max_width = cell_width * num_cells;
 
     // Embedded bitmap glyph?
@@ -919,6 +973,40 @@ copy_color_bitmap_argb(uint8_t *src, pixel* dest, Region *src_rect, Region *dest
     }
 }
 
+static inline void
+copy_lcd_bitmap(uint8_t *src, pixel* dest, Region *src_rect, Region *dest_rect, size_t src_stride, size_t dest_stride, bool bgr) {
+    for (size_t sr = src_rect->top, dr = dest_rect->top; sr < src_rect->bottom && dr < dest_rect->bottom; sr++, dr++) {
+        pixel *d = dest + dest_stride * dr;
+        uint8_t *s = src + src_stride * sr;
+        for(size_t sc = src_rect->left, dc = dest_rect->left; sc < src_rect->right && dc <dest_rect->right; sc++, dc++) {
+            uint8_t *rgb = s + 3 * sc;
+#define C(idx, shift) ( rgb[idx] << shift)
+            if (!bgr)
+              d[dc] = C(0, 24) | C(1, 16) | C(2, 8) | 0xff;
+            else
+              d[dc] = C(2, 24) | C(1, 16) | C(0, 8) | 0xff;
+#undef C
+        }
+    }
+}
+
+static inline void
+copy_lcd_v_bitmap(uint8_t *src, pixel* dest, Region *src_rect, Region *dest_rect, size_t src_stride, size_t dest_stride, bool bgr) {
+    for (size_t sr = src_rect->top, dr = dest_rect->top; sr < src_rect->bottom && dr < dest_rect->bottom; sr++, dr++) {
+        pixel *d = dest + dest_stride * dr;
+        uint8_t *s = src + 3 * src_stride * sr;
+        for(size_t sc = src_rect->left, dc = dest_rect->left; sc < src_rect->right && dc <dest_rect->right; sc++, dc++) {
+            uint8_t *rgb = s + sc;
+#define C(idx, shift) ( rgb[src_stride * idx] << shift)
+            if (!bgr)
+              d[dc] = C(0, 24) | C(1, 16) | C(2, 8) | 0xff;
+            else
+              d[dc] = C(2, 24) | C(1, 16) | C(0, 8) | 0xff;
+#undef C
+        }
+    }
+}
+
 
 static const bool debug_placement = false;
 
@@ -955,6 +1043,8 @@ place_bitmap_in_canvas(pixel *cell, ProcessedBitmap *bm, size_t cell_width, size
     switch (bm->pixel_mode) {
         case FT_PIXEL_MODE_BGRA: copy_color_bitmap_bgra(bm->buf, cell, &src, &dest, bm->stride, cell_width); break;
         case FT_PIXEL_MODE_MAX: copy_color_bitmap_argb(bm->buf, cell, &src, &dest, bm->stride, cell_width); break;
+        case FT_PIXEL_MODE_LCD: copy_lcd_bitmap(bm->buf, cell, &src, &dest, bm->stride, cell_width, bm->bgr); break;
+        case FT_PIXEL_MODE_LCD_V: copy_lcd_v_bitmap(bm->buf, cell, &src, &dest, bm->stride, cell_width, bm->bgr); break;
         default: render_alpha_mask(bm->buf, cell, &src, &dest, bm->stride, cell_width, fg_rgb); break;
     }
 }
@@ -962,7 +1052,7 @@ place_bitmap_in_canvas(pixel *cell, ProcessedBitmap *bm, size_t cell_width, size
 static const ProcessedBitmap EMPTY_PBM = {.factor = 1};
 
 bool
-render_glyphs_in_cells(PyObject *f, bool bold, bool italic, hb_glyph_info_t *info, hb_glyph_position_t *positions, unsigned int num_glyphs, pixel *canvas, unsigned int cell_width, unsigned int cell_height, unsigned int num_cells, unsigned int baseline, bool *was_colored, FONTS_DATA_HANDLE fg, GlyphRenderInfo *ri) {
+render_glyphs_in_cells(PyObject *f, bool bold, bool italic, hb_glyph_info_t *info, hb_glyph_position_t *positions, unsigned int num_glyphs, pixel *canvas, unsigned int cell_width, unsigned int cell_height, unsigned int num_cells, unsigned int baseline, bool *was_colored, bool *was_subpixel, FONTS_DATA_HANDLE fg, GlyphRenderInfo *ri) {
     Face *self = (Face*)f;
     bool is_emoji = *was_colored; *was_colored = is_emoji && self->has_color;
     float x = 0.f, y = 0.f;
@@ -971,6 +1061,7 @@ render_glyphs_in_cells(PyObject *f, bool bold, bool italic, hb_glyph_info_t *inf
     GlyphColorType colored;
     for (unsigned int i = 0; i < num_glyphs; i++) {
         bm = EMPTY_PBM;
+        bm.bgr = self->rgba == FC_RGBA_BGR || self->rgba == FC_RGBA_VBGR;
         // dont load the space glyph since loading it fails for some fonts/sizes and it is anyway to be rendered as a blank
         if (info[i].codepoint != self->space_glyph_id) {
             if (*was_colored && (colored = glyph_color_type(self, info[i].codepoint)) != NOT_COLORED) {
@@ -989,6 +1080,7 @@ render_glyphs_in_cells(PyObject *f, bool bold, bool italic, hb_glyph_info_t *inf
                 }
             }
         }
+        *was_subpixel = bm.pixel_mode == FT_PIXEL_MODE_LCD || bm.pixel_mode == FT_PIXEL_MODE_LCD_V;
         float x_offset = x + (float)positions[i].x_offset / 64.0f;
         y = (float)positions[i].y_offset / 64.0f;
         if (debug_placement) printf("%d: x=%f canvas: %u", i, x_offset, canvas_width);
@@ -1211,10 +1303,24 @@ render_simple_text_impl(PyObject *s, const char *text, unsigned int baseline) {
         FT_UInt glyph_index = FT_Get_Char_Index(self->face, text[n]);
         int error = FT_Load_Glyph(self->face, glyph_index, FT_LOAD_DEFAULT);
         if (error) continue;
-        error = FT_Render_Glyph(self->face->glyph, FT_RENDER_MODE_NORMAL);
+        int render = FT_RENDER_MODE_NORMAL;
+        if (OPT(subpixel_rendering)) {
+            switch (self->rgba) {
+                case FC_RGBA_RGB:
+                case FC_RGBA_BGR:
+                    render = FT_RENDER_MODE_LCD;
+                    break;
+                case FC_RGBA_VRGB:
+                case FC_RGBA_VBGR:
+                    render = FT_RENDER_MODE_LCD_V;
+                    break;
+            }
+        }
+        error = FT_Render_Glyph(self->face->glyph, render);
         if (error) continue;
         FT_Bitmap *bitmap = &self->face->glyph->bitmap;
         pbm = EMPTY_PBM;
+        pbm.bgr = self->rgba == FC_RGBA_BGR || self->rgba == FC_RGBA_VBGR;
         populate_processed_bitmap(self->face->glyph, bitmap, &pbm, false);
         place_bitmap_in_canvas(canvas, &pbm, canvas_width, canvas_height, 0, 0, baseline, n, 0xffffff, pen_x, 0);
         pen_x += self->face->glyph->advance.x >> 6;

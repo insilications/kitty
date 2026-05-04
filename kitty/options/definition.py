@@ -295,6 +295,15 @@ see if this is the cause of the problem or consider using the :code:`ratio` mode
 described above instead of the :code:`%` mode of operation.
 ''')
 
+opt('subpixel_rendering', 'yes',
+    option_type='to_bool', ctype='bool',
+    long_text='''
+Use subpixel rendering instead of grayscale in freetype. Impacts performance,
+but may look better on low DPI screens. Possible values are :code:`none`,
+:code:`lcd`, and :code:`lcd_v`.
+'''
+    )
+
 egr()  # }}}
 
 

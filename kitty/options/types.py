@@ -456,6 +456,7 @@ option_names = (
     'single_window_padding_width',
     'startup_session',
     'strip_trailing_spaces',
+    'subpixel_rendering',
     'symbol_map',
     'sync_to_monitor',
     'tab_activity_symbol',
@@ -664,6 +665,7 @@ class Options:
     single_window_padding_width: FloatEdges = FloatEdges(left=-1.0, top=-1.0, right=-1.0, bottom=-1.0)
     startup_session: str | None = None
     strip_trailing_spaces: choices_for_strip_trailing_spaces = 'never'
+    subpixel_rendering: bool = True
     sync_to_monitor: bool = True
     tab_activity_symbol: str = ''
     tab_bar_align: choices_for_tab_bar_align = 'left'

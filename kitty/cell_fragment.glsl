@@ -20,6 +20,7 @@ in vec3 cell_foreground;
 in vec4 cursor_color_premult;
 in vec3 decoration_fg;
 in float colored_sprite;
+in float subpixel;
 #endif
 
 out vec4 output_color;
@@ -62,7 +63,17 @@ vec4 load_text_foreground_color() {
     // For colored sprites use the color from the sprite rather than the text foreground
     // Return non-premultiplied foreground color
     vec4 text_fg = texture(sprites, sprite_pos);
+#if HAS_SUBPIXEL
+    vec3 unblended_fg = mix(cell_foreground, text_fg.rgb, colored_sprite);
+    float alpha = text_fg.g; // Cairo uses green channel to convert FreeType's subpixel buffer to ARGB
+    float scale_coeff = mix(1, alpha, alpha > 0);
+    vec3 scaled_mask = text_fg.rgb / scale_coeff;
+    vec3 blended_fg = cell_foreground * scaled_mask;
+    float text_alpha = mix(text_fg.a, alpha, subpixel);
+    return vec4(mix(unblended_fg, blended_fg, subpixel), text_alpha);
+#else
     return vec4(mix(cell_foreground, text_fg.rgb, colored_sprite), text_fg.a);
+#endif
 }
 
 vec4 calculate_premul_foreground_from_sprites(vec4 text_fg) {

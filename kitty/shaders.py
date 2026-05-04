@@ -159,7 +159,7 @@ class LoadShaderPrograms:
         if self.needs_recompile:
             self(allow_recompile=True)
 
-    def __call__(self, allow_recompile: bool = False) -> None:
+    def __call__(self, subpixel_rendering: bool = False, allow_recompile: bool = False) -> None:
         opts = get_options()
         self.text_old_gamma = opts.text_composition_strategy == 'legacy'
 
@@ -197,6 +197,7 @@ class LoadShaderPrograms:
             r['FG_OVERRIDE_ALGO'] = '1' if self.text_fg_override_threshold.unit == '%' else '2'
             r['FG_OVERRIDE_THRESHOLD'] = str(self.text_fg_override_threshold.scaled_value)
             r['TEXT_NEW_GAMMA'] = '0' if self.text_old_gamma else '1'
+            r['SUBPIXEL'] = '1' if subpixel_rendering else '0'
             return self.cell_program_replacer(src)
         for prog, (only_fg, only_bg) in {
                 CELL_PROGRAM: (0, 0), CELL_FG_PROGRAM: (1, 0), CELL_BG_PROGRAM: (0, 1),

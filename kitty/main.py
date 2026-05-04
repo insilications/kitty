@@ -88,9 +88,9 @@ def set_custom_ibeam_cursor() -> None:
         log_error(f'Failed to set custom beam cursor with error: {e}')
 
 
-def load_all_shaders() -> None:
+def load_all_shaders(subpixel_rendering: bool = False) -> None:
     try:
-        load_shader_programs()
+        load_shader_programs(subpixel_rendering)
         load_borders_program()
     except CompileError as err:
         raise SystemExit(err)

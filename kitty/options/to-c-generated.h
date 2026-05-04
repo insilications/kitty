@@ -123,6 +123,19 @@ convert_from_opts_text_composition_strategy(PyObject *py_opts, Options *opts) {
 }
 
 static void
+convert_from_python_subpixel_rendering(PyObject *val, Options *opts) {
+    opts->subpixel_rendering = PyObject_IsTrue(val);
+}
+
+static void
+convert_from_opts_subpixel_rendering(PyObject *py_opts, Options *opts) {
+    PyObject *ret = PyObject_GetAttrString(py_opts, "subpixel_rendering");
+    if (ret == NULL) return;
+    convert_from_python_subpixel_rendering(ret, opts);
+    Py_DECREF(ret);
+}
+
+static void
 convert_from_python_cursor_shape(PyObject *val, Options *opts) {
     opts->cursor_shape = PyLong_AsLong(val);
 }
@@ -1506,6 +1519,8 @@ convert_opts_from_python_opts(PyObject *py_opts, Options *opts) {
     convert_from_opts_underline_exclusion(py_opts, opts);
     if (PyErr_Occurred()) return false;
     convert_from_opts_text_composition_strategy(py_opts, opts);
+    if (PyErr_Occurred()) return false;
+    convert_from_opts_subpixel_rendering(py_opts, opts);
     if (PyErr_Occurred()) return false;
     convert_from_opts_cursor_shape(py_opts, opts);
     if (PyErr_Occurred()) return false;
