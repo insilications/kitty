@@ -1212,7 +1212,9 @@ draw_text_loop(Screen *self, const uint32_t *chars, size_t num_chars, text_loop_
             .fg=self->cursor->sgr.fg & COL_MASK, .bg=self->cursor->sgr.bg & COL_MASK, \
             .decoration_fg=force_underline ? ((OPT(url_color) & COL_MASK) << 8) | 2 : self->cursor->sgr.decoration_fg & COL_MASK, \
         } \
-    };
+    }; \
+    { GPUCell *g = (GPUCell *)&s.g; g->fg += \
+        (g->attrs.bold && (g->fg & 0xff) == 1 && g->fg < 0x800) * 0x800; };
 
 static void
 draw_text(Screen *self, const uint32_t *chars, size_t num_chars) {
