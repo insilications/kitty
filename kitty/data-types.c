@@ -677,6 +677,155 @@ replace_c0_codes_except_nl_space_tab(PyObject *self UNUSED, PyObject *obj) {
     }
 }
 
+static inline uint32_t
+c0_control_picture(const uint32_t ch) {
+    /*
+     * C0 controls 0x00–0x1f map to U+2400–U+241f.
+     * DEL 0x7f maps separately to U+2421 SYMBOL FOR DELETE.
+     */
+    return ch == 0x7f ? 0x2421 : 0x2400 + ch;
+}
+
+START_ALLOW_CASE_RANGE
+static PyObject*
+c0_replace_bytes_except_space_tab(
+    const char *input_data,
+    Py_ssize_t input_sz
+) {
+    RAII_PyObject(ans, PyBytes_FromStringAndSize(NULL, input_sz * 3));
+    if (!ans)
+        return NULL;
+
+    char *output = PyBytes_AS_STRING(ans);
+    char buf[4];
+    Py_ssize_t j = 0;
+
+    for (Py_ssize_t i = 0; i < input_sz; i++) {
+        const unsigned char x = (unsigned char)input_data[i];
+
+        switch (x) {
+            case C0_EXCEPT_SPACE_TAB: {
+                const uint32_t ch = c0_control_picture(x);
+                const unsigned sz = encode_utf8(ch, buf);
+
+                for (unsigned c = 0; c < sz; c++, j++)
+                    output[j] = buf[c];
+            } break;
+
+            default:
+                output[j++] = (char)x;
+                break;
+        }
+    }
+
+    if (_PyBytes_Resize(&ans, j) != 0)
+        return NULL;
+
+    Py_INCREF(ans);
+    return ans;
+}
+
+static PyObject*
+c0_replace_unicode_except_space_tab(PyObject *input) {
+    const Py_ssize_t input_sz = PyUnicode_GET_LENGTH(input);
+
+    RAII_PyObject(ans, PyUnicode_New(input_sz, 1114111));
+    if (!ans)
+        return NULL;
+
+    void *input_data = PyUnicode_DATA(input);
+    const int input_kind = PyUnicode_KIND(input);
+
+    void *output_data = PyUnicode_DATA(ans);
+    const int output_kind = PyUnicode_KIND(ans);
+
+    Py_UCS4 maxchar = 0;
+    bool changed = false;
+
+    for (Py_ssize_t i = 0; i < input_sz; i++) {
+        Py_UCS4 ch = PyUnicode_READ(input_kind, input_data, i);
+
+        switch (ch) {
+            case C0_EXCEPT_SPACE_TAB:
+                ch = c0_control_picture(ch);
+                changed = true;
+                break;
+        }
+
+        if (ch > maxchar)
+            maxchar = ch;
+
+        PyUnicode_WRITE(output_kind, output_data, i, ch);
+    }
+
+    if (!changed) {
+        Py_INCREF(input);
+        return input;
+    }
+
+    if (maxchar > 65535) {
+        Py_INCREF(ans);
+        return ans;
+    }
+
+    /*
+     * Re-create the result using the narrowest Unicode representation
+     * appropriate for its actual maximum code point.
+     */
+    RAII_PyObject(ans2, PyUnicode_New(input_sz, maxchar));
+    if (!ans2)
+        return NULL;
+
+    if (PyUnicode_CopyCharacters(
+            ans2, 0,
+            ans, 0,
+            input_sz
+        ) == -1)
+        return NULL;
+
+    Py_INCREF(ans2);
+    return ans2;
+}
+END_ALLOW_CASE_RANGE
+
+static PyObject*
+replace_c0_codes_except_space_tab(
+    PyObject *self UNUSED,
+    PyObject *obj
+) {
+    if (PyUnicode_Check(obj)) {
+        return c0_replace_unicode_except_space_tab(obj);
+    }
+
+    if (PyBytes_Check(obj)) {
+        return c0_replace_bytes_except_space_tab(
+            PyBytes_AS_STRING(obj),
+            PyBytes_GET_SIZE(obj)
+        );
+    }
+
+    if (PyMemoryView_Check(obj)) {
+        Py_buffer *buf = PyMemoryView_GET_BUFFER(obj);
+
+        return c0_replace_bytes_except_space_tab(
+            buf->buf,
+            buf->len
+        );
+    }
+
+    if (PyByteArray_Check(obj)) {
+        return c0_replace_bytes_except_space_tab(
+            PyByteArray_AS_STRING(obj),
+            PyByteArray_GET_SIZE(obj)
+        );
+    }
+
+    PyErr_SetString(
+        PyExc_TypeError,
+        "Input must be bytes, memoryview, bytearray or unicode"
+    );
+    return NULL;
+}
 
 static PyObject *
 find_in_memoryview(PyObject *self UNUSED, PyObject *args) {
@@ -831,6 +980,7 @@ set_uint_at_address(PyObject *self UNUSED, PyObject *const *args, Py_ssize_t nar
 
 static PyMethodDef module_methods[] = {
     METHODB(replace_c0_codes_except_nl_space_tab, METH_O),
+    METHODB(replace_c0_codes_except_space_tab, METH_O),
     METHODB(read_file, METH_O),
     {"parse_cli_from_spec", parse_cli_from_python_spec, METH_VARARGS, ""},
     {"wcwidth", (PyCFunction)wcwidth_wrap, METH_O, ""},
