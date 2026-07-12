@@ -86,6 +86,7 @@ from .fast_data_types import (
     pt_to_px,
     remove_timer,
     replace_c0_codes_except_nl_space_tab,
+    replace_c0_codes_except_space_tab,
     set_redirect_keys_to_overlay,
     set_window_logo,
     set_window_padding,
@@ -2525,10 +2526,20 @@ class Window:
             if text:
                 btext = text.encode()
                 sanitized = replace_c0_codes_except_nl_space_tab(btext)
-                if not w.screen.in_bracketed_paste_mode:
-                    sanitized = sanitized.replace(b'\n', b'\x1bE')
-                w.screen.paste_bytes(sanitized)
-                w.send_key('enter')
+                # if not w.screen.in_bracketed_paste_mode:
+                    # sanitized = sanitized.replace(b'\n', b'\x1bE')
+                # sanitized = replace_c0_codes_except_space_tab(btext)
+                # Locate the first occurrence of the newline byte
+                pos = sanitized.find(b'\n')
+
+                # find() returns -1 if the byte is not found
+                if pos != -1:
+                    # Slice from the beginning up to (but not including) the newline
+                    sanitized = sanitized[:pos]
+                w.screen.paste_bytes(sanitized + b'\r')
+                # w.screen.paste_bytes(sanitized + b"\r\n")
+                # w.screen.paste_bytes(sanitized)
+                # w.send_key('enter')
 
     def show_cmd_output(self, which: CommandOutput, title: str = 'Command output', as_ansi: bool = True, add_wrap_markers: bool = True) -> None:
         text = self.cmd_output(which, as_ansi=as_ansi, add_wrap_markers=add_wrap_markers)
