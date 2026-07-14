@@ -2508,7 +2508,21 @@ class Window:
         text = self.as_text(as_ansi=True, add_history=True, add_wrap_markers=True)
         data = self.pipe_data(text, has_wrap_markers=True)
         cursor_on_screen = self.screen.scrolled_by < self.screen.lines - self.screen.cursor.y
-        return get_boss().display_scrollback(self, data['text'], data['input_line_number'], report_cursor=cursor_on_screen)
+        selection = self.text_for_selection()
+        if selection:
+            sanitized = replace_c0_codes_except_nl_space_tab(selection)
+            pos = sanitized.find('\n')
+            if pos != -1:
+                sanitized = sanitized[:pos]
+            # btext = selection.encode()
+            # sanitized = replace_c0_codes_except_nl_space_tab(btext)
+            # pos = sanitized.find(b'\n')
+            # if pos != -1:
+            #     sanitized = sanitized[:pos]
+
+            return get_boss().my_display_scrollback(self, data['text'], data['input_line_number'], selection=sanitized, report_cursor=cursor_on_screen)
+
+        return get_boss().my_display_scrollback(self, data['text'], data['input_line_number'], report_cursor=cursor_on_screen)
 
     @ac(
         'sc',

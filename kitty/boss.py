@@ -2441,6 +2441,43 @@ class Boss:
                 s.shutdown(socket.SHUT_RDWR)
             s.close()
 
+    def my_display_scrollback(self, window: Window, data: bytes | str, input_line_number: int = 0, selection: str = '', title: str = '', report_cursor: bool = True) -> Window | None:
+
+        def prepare_arg(x: str) -> str:
+            x = x.replace('SELECTION', selection)
+            x = x.replace('INPUT_LINE_NUMBER', str(input_line_number))
+            x = x.replace('CURSOR_LINE', str(window.screen.cursor.y + 1) if report_cursor else '0')
+            x = x.replace('CURSOR_COLUMN', str(window.screen.cursor.x + 1) if report_cursor else '0')
+            return x
+
+        cmd = list(map(prepare_arg, get_options().scrollback_pager))
+        if not os.path.isabs(cmd[0]):
+            resolved_exe = which(cmd[0])
+            if not resolved_exe:
+                log_error(f'The scrollback_pager {cmd[0]} was not found in PATH, falling back to less')
+                resolved_exe = which('less') or 'less'
+            cmd[0] = resolved_exe
+
+        # if os.path.basename(cmd[0]) == 'less':
+            # cmd.append('-+F')  # reset --quit-if-one-screen
+        tab = self.active_tab
+        if tab is not None:
+            bdata = data.encode('utf-8') if isinstance(data, str) else data
+            if is_macos and cmd[0] == '/usr/bin/less' and macos_version()[:2] < (12, 3):
+                # the system less before macOS 12.3 barfs up OSC codes, so sanitize them ourselves
+                sentinel = os.path.join(cache_dir(), 'less-is-new-enough')
+                if not os.path.exists(sentinel):
+                    if less_version(cmd[0]) >= 581:
+                        open(sentinel, 'w').close()
+                    else:
+                        bdata = re.sub(br'\x1b\].*?\x1b\\', b'', bdata)
+
+            return tab.new_special_window(
+                SpecialWindow(cmd, bdata, title or _('History'), overlay_for=window.id, cwd=window.cwd_of_child),
+                copy_colors_from=self.active_window
+                )
+        return None
+
     def display_scrollback(self, window: Window, data: bytes | str, input_line_number: int = 0, title: str = '', report_cursor: bool = True) -> Window | None:
 
         def prepare_arg(x: str) -> str:
