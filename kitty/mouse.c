@@ -1891,20 +1891,24 @@ scroll_event_in_window(OSWindow *osw, Window *w, const GLFWScrollEvent *ev, unsi
     }
     finish_scroll_animation(screen);
     if (ev->y_offset != 0.0) {
+        double y_offset_mod = ev->y_offset;
+        if (ev->keyboard_modifiers & GLFW_MOD_ALT) {
+            y_offset_mod *= 5;
+        }
         if (screen->modes.mouse_tracking_mode == NO_TRACKING && pixel_scroll_enabled_for_screen(screen) &&
             (ev->offset_type == GLFW_SCROLL_OFFEST_HIGHRES || ev->offset_type == GLFW_SCROLL_OFFEST_V120)) {
             double delta_pixels;
             if (ev->offset_type == GLFW_SCROLL_OFFEST_HIGHRES) {
-                delta_pixels = ev->y_offset * OPT(touch_scroll_multiplier);
+                delta_pixels = y_offset_mod * OPT(touch_scroll_multiplier);
             } else {
-                const double offset_lines = (ev->y_offset / 120.) * OPT(wheel_scroll_multiplier);
+                const double offset_lines = (y_offset_mod / 120.) * OPT(wheel_scroll_multiplier);
                 delta_pixels = offset_lines * cell_height;
             }
             osw->scroll.pending_pixels_y = 0.0;
             if (screen_apply_pixel_scroll(screen, delta_pixels) && screen->selections.in_progress) update_drag(w);
         } else {
             int s = scale_scroll(
-                screen->modes.mouse_tracking_mode, ev->y_offset, ev->offset_type, &osw->scroll.pending_pixels_y, cell_height, &osw->scroll.last_v120_dir_y);
+                screen->modes.mouse_tracking_mode, y_offset_mod, ev->offset_type, &osw->scroll.pending_pixels_y, cell_height, &osw->scroll.last_v120_dir_y);
             if (s) {
                 bool upwards = s > 0;
                 if (screen->modes.mouse_tracking_mode) {
