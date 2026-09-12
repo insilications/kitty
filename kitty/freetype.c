@@ -268,6 +268,11 @@ face_apply_scaling(PyObject *f, const FONTS_DATA_HANDLE fg) {
     return false;
 }
 
+bool
+face_has_color(PyObject *f) {
+    return ((Face*)f)->has_color;
+}
+
 static bool
 init_ft_face(Face *self, PyObject *path, int hinting, int hintstyle, long index, FONTS_DATA_HANDLE fg) {
     copy_face_metrics(self);
@@ -1204,25 +1209,27 @@ render_glyphs_in_cells(
     FONTS_DATA_HANDLE fg,
     GlyphRenderInfo *ri) {
     Face *self = (Face *)f;
-    bool is_emoji = *was_colored;
-    *was_colored = is_emoji && self->has_color;
+    // *was_colored is an incoming hint; it is set on output to reflect whether
+    // any glyph was actually rendered as color.
+    bool want_color = *was_colored && self->has_color;
+    *was_colored = false;
     float x = 0.f, y = 0.f;
     ProcessedBitmap bm;
     unsigned int canvas_width = cell_width * num_cells;
     GlyphColorType colored;
     for (unsigned int i = 0; i < num_glyphs; i++) {
         bm = EMPTY_PBM;
+        bool colored_glyph = false;
         // dont load the space glyph since loading it fails for some fonts/sizes and it is anyway to be rendered as a blank
         if (info[i].codepoint != self->space_glyph_id) {
-            if (*was_colored && (colored = glyph_color_type(self, info[i].codepoint)) != NOT_COLORED) {
+            if (want_color && (colored = glyph_color_type(self, info[i].codepoint)) != NOT_COLORED) {
                 if (!render_color_bitmap(self, info[i].codepoint, &bm, cell_width, cell_height, num_cells, baseline)) {
                     if (PyErr_Occurred()) PyErr_Print();
                     if (!render_bitmap(self, info[i].codepoint, &bm, cell_width, cell_height, num_cells, bold, italic, true, fg)) {
                         free_processed_bitmap(&bm);
                         return false;
                     }
-                    *was_colored = false;
-                }
+                    } else { colored_glyph = true; *was_colored = true; }
             } else {
                 if (!render_bitmap(self, info[i].codepoint, &bm, cell_width, cell_height, num_cells, bold, italic, true, fg)) {
                     free_processed_bitmap(&bm);
@@ -1233,7 +1240,7 @@ render_glyphs_in_cells(
         float x_offset = x + (float)positions[i].x_offset / 64.0f;
         y = (float)positions[i].y_offset / 64.0f;
         if (debug_placement) printf("%d: x=%f canvas: %u", i, x_offset, canvas_width);
-        if ((*was_colored || self->face->glyph->metrics.width > 0) && bm.width > 0) {
+        if ((colored_glyph || self->face->glyph->metrics.width > 0) && bm.width > 0) {
             place_bitmap_in_canvas(canvas, &bm, canvas_width, cell_height, x_offset, y, baseline, i, 0xffffff, 0, 0);
         }
         if (debug_placement) printf(" adv: %f\n", (float)positions[i].x_advance / 64.0f);
